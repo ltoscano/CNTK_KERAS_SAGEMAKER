@@ -1,0 +1,112 @@
+#!/usr/bin/env python
+
+from __future__ import print_function
+
+import os
+import json
+import pickle
+import sys
+import traceback
+
+import cntk as C
+import numpy as np
+import keras as K
+
+SEED = 42
+np.random.seed(SEED)
+C.cntk_py.set_fixed_random_seed(SEED)
+
+# These are the paths to where SageMaker mounts interesting things in your container.
+prefix = '/opt/ml/'
+input_path = prefix + 'input/data'
+output_path = os.path.join(prefix, 'output')
+model_path = os.path.join(prefix, 'model')
+param_path = os.path.join(prefix, 'input/config/hyperparameters.json')
+
+channel_name='training'
+training_path = os.path.join(input_path, channel_name)
+
+# The function to execute the training.
+def train():
+
+    def get_int_param(trainingParams,param,default=None):
+        value = trainingParams.get(param,default)
+        if value is not None:
+                value = int(value)
+        return value
+
+    print('Starting the training.')
+    try:
+        # Read in any hyperparameters that the user passed with the training job
+        with open(param_path, 'r') as tc:
+            trainingParams = json.load(tc)
+
+        input_files = [ os.path.join(training_path, file) for file in os.listdir(training_path) ]
+        if len(input_files) == 0:
+            raise ValueError(('There are no files in {}.\n' +
+                              'This usually indicates that the channel ({}) was incorrectly specified,\n' +
+                              'the data specification in S3 was incorrectly specified or the role specified\n' +
+                              'does not have permission to access the data.').format(training_path, channel_name))
+
+	trainset = np.genfromtxt(os.path.join(training_path,'trainset.csv'), delimiter=',').astype(np.float32)
+	testset = np.genfromtxt(os.path.join(training_path,'testset.csv'), delimiter=',').astype(np.float32)
+
+        X_train, Y_train = np.hsplit(trainset,2)
+        X_test, Y_test = np.hsplit(testset,2)
+
+        input_dim = get_int_param(trainingParams, 'input_dim')
+
+        num_classes = get_int_param(trainingParams, 'num_classes')
+
+        num_hidden_layers = get_int_param(trainingParams, 'num_hidden_layers')
+
+        hidden_layers_dim = get_int_param(trainingParams, 'hidden_layers_dim')
+
+        epochs = get_int_param(trainingParams,'epochs')
+
+        minibatch_size = get_int_param(trainingParams,'minibatch_size')
+
+        verbose = get_int_param(trainingParams,'verbose')
+
+        init = trainingParams.get('init', None)
+        if init is not None:
+                init = str(init)
+
+        num_samples = len(X_train)
+        num_minibatches_to_train = num_samples / minibatch_size
+
+        model = K.models.Sequential()
+        for _ in range(num_hidden_layers):
+                model.add(K.layers.Dense(hidden_layers_dim, input_dim=input_dim, kernel_initializer=init, activation='sigmoid'))
+        model.add(K.layers.Dense(num_classes, activation='softmax'))
+
+        model.compile(loss='categorical_crossentropy', optimizer='sgd', metrics=['accuracy'])
+
+        model.fit(X_train, Y_train, validation_data=(X_test,Y_test), batch_size = num_minibatches_to_train, epochs=epochs, verbose = verbose)
+
+        score = model.evaluate(X_test, Y_test)
+
+        model_json = model.to_json()
+
+        with open(os.path.join(model_path, 'model.json'), "w") as json_file:
+                json_file.write(model_json)
+
+        model.save_weights(os.path.join(model_path, 'weights.hdf5'))
+
+        print("\n\nScore: %.2f, training complete."%(score[1]*100))
+    except Exception as e:
+        # Write out an error file. This will be returned as the failureReason in the
+        # DescribeTrainingJob result.
+        trc = traceback.format_exc()
+        with open(os.path.join(output_path, 'failure'), 'w') as s:
+            s.write('Exception during training: ' + str(e) + '\n' + trc)
+        # Printing this causes the exception to be in the training job logs, as well.
+        print('Exception during training: ' + str(e) + '\n' + trc, file=sys.stderr)
+        # A non-zero exit code causes the training job to be marked as Failed.
+        sys.exit(255)
+
+if __name__ == '__main__':
+    train()
+
+    # A zero exit code causes the job to be marked a Succeeded.
+    sys.exit(0)

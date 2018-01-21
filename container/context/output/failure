@@ -1,0 +1,13 @@
+Exception during training: No JSON object could be decoded
+Traceback (most recent call last):
+  File "/data/train", line 35, in train
+    trainingParams = json.load(tc)
+  File "/root/anaconda3/envs/cntk-py27/lib/python2.7/json/__init__.py", line 291, in load
+    **kw)
+  File "/root/anaconda3/envs/cntk-py27/lib/python2.7/json/__init__.py", line 339, in loads
+    return _default_decoder.decode(s)
+  File "/root/anaconda3/envs/cntk-py27/lib/python2.7/json/decoder.py", line 364, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+  File "/root/anaconda3/envs/cntk-py27/lib/python2.7/json/decoder.py", line 382, in raw_decode
+    raise ValueError("No JSON object could be decoded")
+ValueError: No JSON object could be decoded
